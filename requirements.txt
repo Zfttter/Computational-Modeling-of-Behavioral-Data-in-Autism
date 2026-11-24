@@ -10,7 +10,7 @@ pymc>=5
 arviz
 tqdm
 pyyaml
+torch
 # 可选:VLM 阶段
 # transformers
-# torch
 # opencv-python

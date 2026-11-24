@@ -172,7 +172,34 @@ $$\text{P}(\text{正常样本被误判为异常}) \leq \alpha$$
 
 > VLM 模块为框架性实现，实际调用需配置 API key。定位为姿态方法的**上下文补充**（理解场景语义），而非替代。
 
-### 3.10 ADOS 临床评分关联分析
+### 3.10 ST-GCN 骨架图卷积网络
+
+骨架数据天然具有图结构（关节=节点，骨骼=边），图卷积网络能直接建模空间拓扑关系。实现轻量级 ST-GCN：
+
+**架构：**
+- 输入：(T, 25, 2) 原始骨架坐标
+- 空间图卷积：基于 BODY_25 邻接矩阵（含自连接 + 度归一化）
+- 时间卷积：kernel=9（覆盖 ~0.3s），残差连接
+- 2 层 ST-GCN block，hidden_dim=64
+- Global Average Pooling → 二分类头
+- 参数量：83,558
+
+**任务：** Pass/Fail 二分类（儿童是否通过干预活动）
+
+**实验设置：**
+- 300 个 MMASD 片段，按**儿童 ID 划分**训练/验证集（防止数据泄露）
+- 训练 80 epochs, lr=5e-4, Adam + CosineAnnealing
+
+| 方法 | 输入 | Accuracy | F1 | 可解释性 |
+|---|---|---|---|---|
+| SVM + 手工特征 | 100 维滑窗特征 | 52.6% | 0.526 | 高 |
+| **ST-GCN** | 原始骨架 (T×25×2) | **65.3%** | **0.651** | 低 |
+
+> **Trade-off 分析：** ST-GCN 比 SVM 高 12.6 个百分点，说明骨架的空间-时间结构包含手工特征未捕获的判别信息。但 SVM 更可解释（特征有物理意义），且在小数据上更稳定。临床部署应考虑任务需求：**可解释性优先选 SVM，准确率优先选 ST-GCN**。
+
+参考：Yan et al., "Spatial Temporal Graph Convolutional Networks for Skeleton-Based Action Recognition", *AAAI*, 2018.
+
+### 3.11 ADOS 临床评分关联分析
 
 将计算运动特征与 ADOS-2 临床金标准评分做关联，检验计算方法的**临床效度**（clinical validity）。
 
@@ -214,6 +241,8 @@ $$\text{P}(\text{正常样本被误判为异常}) \leq \alpha$$
 | 姿态几何规则 | 行为分类 | F1 = 1.000 | ❌ | 无监督（领域知识）|
 | 层级贝叶斯 | 个体差异 | σ_pop = 0.128 | ✅ 收缩 + CI | 无监督 |
 | 临床关联 | ADOS 效度 | ρ=0.521 (p=.022) | ✅ | 相关分析 |
+| SVM + 手工特征 | Pass/Fail 分类 | Acc = 52.6% | ❌ | 有监督 |
+| **ST-GCN** | Pass/Fail 分类 | **Acc = 65.3%** | ❌ | 有监督 |
 | VLM 上下文 | 场景理解 | 定性 | ❌ | 零样本 |
 
 ---
@@ -258,7 +287,8 @@ streamlit run app.py
 │   ├── 02_pipeline_real_data.py    # 真实数据全流程
 │   ├── 03_full_evaluation.py       # 全方法对比评估
 │   ├── 04_clinical_correlation.py  # ADOS 临床评分关联分析
-│   └── 05_conformal_prediction.py  # Conformal Prediction 校准检测
+│   ├── 05_conformal_prediction.py  # Conformal Prediction 校准检测
+│   └── 06_stgcn_comparison.py      # ST-GCN vs 经典方法对比
 ├── src/
 │   ├── data/
 │   │   ├── mmasd_loader.py         # MMASD 数据加载器
@@ -272,6 +302,7 @@ streamlit run app.py
 │   │   ├── hmm.py                  # 隐马尔可夫模型
 │   │   ├── oneclass.py             # One-class SVM
 │   │   ├── conformal.py            # Conformal Prediction 校准检测
+│   │   ├── stgcn.py                # ST-GCN 骨架图卷积网络
 │   │   └── vlm_analyzer.py         # VLM 分析 + 姿态几何检测
 │   ├── analysis/
 │   │   └── clinical_correlation.py # ADOS 临床评分关联分析
@@ -318,7 +349,7 @@ python -I notebooks/02_pipeline_real_data.py
 - **VLM 量化评估**：VLM 模块为框架性实现，需要系统的定量对比
 - **跨数据集域适应**：不同数据集的骨架格式、相机参数、被试群体存在差异
 - **因果推断**：当前为相关性分析，运动特征与 ADOS 评分的因果关系需纵向数据验证
-- **深度学习基线**：ST-GCN 等骨架图神经网络与经典方法的系统对比（计划中）
+- **更大规模 ST-GCN**：当前 ST-GCN 在 300 样本上训练，使用全部 1,269 个 pass/fail 样本 + 预训练可进一步提升
 
 ---
 

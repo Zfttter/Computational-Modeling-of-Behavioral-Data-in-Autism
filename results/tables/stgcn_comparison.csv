@@ -1,0 +1,3 @@
+Method,Type,Input,Accuracy,Weighted_F1,Parameters,Interpretability,Training_Time
+SVM + Hand-crafted Features,Classical ML,100-dim window features,0.526,0.526,~100 (SVM support vectors),High,< 1s
+ST-GCN (2-layer),Deep Learning,Raw skeleton (T×25×2),0.653,0.651,"83,558",Low,~80 epochs (CPU)
