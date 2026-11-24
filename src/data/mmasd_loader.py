@@ -159,24 +159,40 @@ def discover_samples(root: pathlib.Path, modality: str = "2d") -> List[Sample]:
     """扫描 data/raw/MMASD/ 下所有样本。
 
     modality: "2d" 扫描 skeleton_2d/, "3d" 扫描 skeleton_3d/
+
+    实际目录结构:
+      skeleton_2d/output/{activity_category}/{sample_name}/  (2D OpenPose)
+      skeleton_3d_71/{activity_category}/{sample_name}.npz   (3D ROMP 71-joint)
     """
     samples = []
     if modality == "2d":
         base = root / "skeleton_2d"
         if not base.exists():
             return samples
-        for d in sorted(base.iterdir()):
-            if d.is_dir():
-                info = parse_sample_id(d.name)
-                if info:
-                    samples.append(Sample(
-                        activity=info["activity"],
-                        child_id=info["child_id"],
-                        day=info["day"],
-                        clip_idx=info["clip_idx"],
-                        label=info["label"],
-                        path=d,
-                    ))
+        # 实际结构: skeleton_2d/output/{activity_cat}/{sample}/
+        # 也兼容: skeleton_2d/{sample}/
+        search_dirs = []
+        output_dir = base / "output"
+        if output_dir.exists():
+            for activity_dir in sorted(output_dir.iterdir()):
+                if activity_dir.is_dir():
+                    for d in sorted(activity_dir.iterdir()):
+                        if d.is_dir():
+                            search_dirs.append(d)
+        else:
+            search_dirs = [d for d in sorted(base.iterdir()) if d.is_dir()]
+
+        for d in search_dirs:
+            info = parse_sample_id(d.name)
+            if info:
+                samples.append(Sample(
+                    activity=info["activity"],
+                    child_id=info["child_id"],
+                    day=info["day"],
+                    clip_idx=info["clip_idx"],
+                    label=info["label"],
+                    path=d,
+                ))
     elif modality == "3d":
         base = root / "skeleton_3d"
         if not base.exists():
