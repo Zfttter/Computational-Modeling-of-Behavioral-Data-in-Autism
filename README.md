@@ -225,7 +225,7 @@ source .venv/bin/activate
 streamlit run app.py
 ```
 
-浏览器打开 `http://localhost:8501`，包含 6 个 Tab：
+浏览器打开 `http://localhost:8501`，包含 8 个 Tab：
 
 | Tab | 功能 |
 |---|---|
@@ -235,6 +235,8 @@ streamlit run app.py
 | 📐 Bayesian Changepoint | MCMC 变点检测 + 后验分布 + 90% 置信区间 |
 | 🎯 Anomaly Detection | One-class SVM 窗口级异常检测与可视化 |
 | 🔍 Behavior Detection | 拍手/摇摆/撞头的频率分析检测 + 频谱图 |
+| 🛡️ Conformal Prediction | 校准异常检测，可调 α 显著性水平 + p-value 可视化 |
+| 🏥 ADOS Correlation | ADOS 临床评分关联分析，热力图 + 散点图 + 回归 |
 
 支持三种合成数据模式（normal / repetitive / changepoint）和 OpenPose JSON 上传。
 

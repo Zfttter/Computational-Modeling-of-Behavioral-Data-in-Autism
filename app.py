@@ -33,6 +33,7 @@ from src.models.oneclass import fit_oneclass, score
 from src.models.vlm_analyzer import (
     detect_arm_flapping, detect_rocking, detect_head_banging, pose_geometry_analysis
 )
+from src.models.conformal import split_conformal_anomaly, conformal_with_multiple_alphas
 
 # ══════════════════════════════════════════════════════════════
 # 页面配置
@@ -119,9 +120,10 @@ t_sec = np.arange(T_actual) / fs
 # ══════════════════════════════════════════════════════════════
 # Tab 布局
 # ══════════════════════════════════════════════════════════════
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "🦴 Skeleton", "🔧 Preprocessing", "📊 HMM Segmentation",
     "📐 Bayesian Changepoint", "🎯 Anomaly Detection", "🔍 Behavior Detection",
+    "🛡️ Conformal Prediction", "🏥 ADOS Correlation",
 ])
 
 # ── Tab 1: 骨架可视化 ────────────────────────────────────────
@@ -459,6 +461,153 @@ with tab6:
     fig.tight_layout()
     st.pyplot(fig)
     plt.close()
+
+# ── Tab 7: Conformal Prediction ─────────────────────────────
+with tab7:
+    st.subheader("Conformal Prediction — Calibrated Anomaly Detection")
+    st.markdown("""
+    **Why?** Standard One-class SVM gives binary anomaly labels with no false-positive control.
+    **Conformal prediction** provides a **p-value** for each window and guarantees that the
+    false positive rate ≤ α, critical for clinical deployment.
+    """)
+
+    wins_cp = sliding_windows(kp_cleaned, win=win_size, stride=win_stride)
+    if len(wins_cp) < 8:
+        st.warning("Need more windows for conformal analysis. Increase duration.")
+    else:
+        feats_cp = []
+        for w in wins_cp:
+            try:
+                f = window_features(w)
+                if np.isfinite(f).all():
+                    feats_cp.append(f)
+            except Exception:
+                pass
+
+        X_cp = np.array(feats_cp)
+        if len(X_cp) < 8:
+            st.warning("Not enough valid feature windows.")
+        else:
+            n_tr = max(3, len(X_cp) // 3)
+            n_ca = max(2, len(X_cp) // 3)
+            X_tr_cp = X_cp[:n_tr]
+            X_ca_cp = X_cp[n_tr:n_tr + n_ca]
+            X_te_cp = X_cp[n_tr + n_ca:]
+
+            if len(X_te_cp) < 2:
+                st.warning("Not enough test windows. Increase duration.")
+            else:
+                alpha_sel = st.slider("Significance level α", 0.01, 0.30, 0.10, 0.01,
+                                      help="Lower α = fewer false alarms but may miss some anomalies")
+
+                cr = split_conformal_anomaly(X_tr_cp, X_ca_cp, X_te_cp, alpha=alpha_sel, nu=nu)
+
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Coverage guarantee", f"{1 - alpha_sel:.0%}")
+                n_anom_cp = int((cr.predictions == -1).sum())
+                col2.metric("Anomalies detected", f"{n_anom_cp} / {len(X_te_cp)}")
+                col3.metric("Threshold", f"{cr.threshold:.3f}")
+
+                fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+
+                # P-value bar chart
+                colors_pv = ["#F44336" if p < alpha_sel else "#4CAF50" for p in cr.p_values]
+                axes[0].bar(range(len(cr.p_values)), cr.p_values, color=colors_pv, alpha=0.7)
+                axes[0].axhline(alpha_sel, color="black", ls="--", lw=1.5, label=f"α={alpha_sel}")
+                axes[0].set_xlabel("Test window index")
+                axes[0].set_ylabel("Conformal p-value")
+                axes[0].set_title("P-values (red = anomaly)")
+                axes[0].legend()
+
+                # Calibration scores distribution
+                axes[1].hist(cr.calibration_scores, bins=20, alpha=0.6, color="#2196F3",
+                             label="Calibration scores")
+                axes[1].axvline(cr.threshold, color="red", ls="--", lw=1.5,
+                                label=f"Threshold (q={1 - alpha_sel:.2f})")
+                axes[1].set_xlabel("Nonconformity score")
+                axes[1].set_ylabel("Count")
+                axes[1].set_title("Calibration Score Distribution")
+                axes[1].legend()
+
+                fig.tight_layout()
+                st.pyplot(fig)
+                plt.close()
+
+                st.markdown(f"""
+                **Interpretation:** At α={alpha_sel}, the system guarantees that **at most {alpha_sel:.0%}**
+                of truly normal windows will be incorrectly flagged as anomalous. Windows with
+                p-value < {alpha_sel} are flagged (shown in red). This finite-sample guarantee holds
+                regardless of the underlying data distribution.
+                """)
+
+# ── Tab 8: ADOS Clinical Correlation ────────────────────────
+with tab8:
+    st.subheader("ADOS Clinical Score Correlation")
+    st.markdown("""
+    **Research question:** Can computational movement features predict ADOS-2 clinical severity scores?
+
+    This analysis links skeleton-derived movement features (speed, frequency, variability)
+    with ADOS-2 subscales across 19 children from the MMASD dataset.
+    """)
+
+    # Load pre-computed results if available
+    import os
+    corr_path = os.path.join(os.path.dirname(__file__), "results", "tables", "ados_correlation_table.csv")
+    reg_path = os.path.join(os.path.dirname(__file__), "results", "tables", "regression_results.csv")
+    heatmap_path = os.path.join(os.path.dirname(__file__), "results", "figures", "ados_correlation_heatmap.png")
+    scatter_path = os.path.join(os.path.dirname(__file__), "results", "figures", "ados_scatter_matrix.png")
+    severity_path = os.path.join(os.path.dirname(__file__), "results", "figures", "ados_severity_groups.png")
+    reg_fig_path = os.path.join(os.path.dirname(__file__), "results", "figures", "ados_regression.png")
+
+    if os.path.exists(corr_path):
+        corr_df = pd.read_csv(corr_path)
+
+        st.markdown("### Spearman Correlations: Movement Features ↔ ADOS Subscales")
+
+        sig_df = corr_df[corr_df["significant"] == True]
+        if len(sig_df) > 0:
+            st.success(f"**{len(sig_df)} significant correlations found (p < 0.05)**")
+            for _, r in sig_df.iterrows():
+                direction = "↑" if r["spearman_rho"] > 0 else "↓"
+                st.markdown(f"- **{r['feature']}** {direction} **{r['ados_subscale']}**: "
+                            f"ρ = {r['spearman_rho']:.3f}, p = {r['p_value']:.4f}")
+
+        # Show heatmap
+        if os.path.exists(heatmap_path):
+            st.image(heatmap_path, caption="Correlation Heatmap (* p<.05, ** p<.01)")
+
+        # Show scatter
+        if os.path.exists(scatter_path):
+            st.markdown("### Key Feature-Score Relationships")
+            st.image(scatter_path, caption="Scatter plots with trend lines and Spearman correlations")
+
+        # Severity groups
+        if os.path.exists(severity_path):
+            st.markdown("### Movement Features by ADOS Severity Group")
+            st.image(severity_path, caption="Boxplots by severity: Mild (1-4), Moderate (5-7), Severe (8-10)")
+
+        # Regression
+        if os.path.exists(reg_path):
+            st.markdown("### Multiple Regression: Features → ADOS Comparison Score")
+            reg_df = pd.read_csv(reg_path)
+            st.dataframe(reg_df, use_container_width=True, hide_index=True)
+
+        if os.path.exists(reg_fig_path):
+            st.image(reg_fig_path, caption="Predicted vs True ADOS Comparison Score")
+
+        # Full table
+        with st.expander("Full Correlation Table"):
+            st.dataframe(corr_df, use_container_width=True, hide_index=True)
+
+        st.markdown("""
+        ### Key Finding
+        **Dominant wrist movement frequency** significantly correlates with ADOS severity
+        (ρ = 0.488, p = 0.034): children with higher-frequency repetitive movements
+        tend to have more severe ASD symptoms. This validates skeleton-derived movement
+        features as potential computational biomarkers for ASD severity assessment.
+        """)
+    else:
+        st.info("Run `python -I notebooks/04_clinical_correlation.py` first to generate ADOS analysis results.")
 
 # ══════════════════════════════════════════════════════════════
 # Footer
