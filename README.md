@@ -127,7 +127,30 @@ $$y_t \sim \mathcal{N}(\mu_k, \sigma), \quad k = \begin{cases} 1 & t < \tau \\ 2
 
 **结果：** F1 = 0.891，Precision = 0.804，Recall = 1.000
 
-### 3.6 姿态几何行为检测
+### 3.6 Conformal Prediction 校准异常检测
+
+传统 One-class SVM 输出二分类，无法控制假阳性率。在临床场景中，误报（将正常行为标记为异常）有实际代价。**Conformal prediction** 提供有限样本统计保证：
+
+$$\text{P}(\text{正常样本被误判为异常}) \leq \alpha$$
+
+方法：
+- **Split conformal**：训练集拟合 OC-SVM，校准集计算 nonconformity score 分位数
+- 对测试样本输出 **p-value**（而非二分类），p < α 判为异常
+- 有限样本修正：$\hat{q} = \lceil (1-\alpha)(n_{cal}+1) \rceil / n_{cal}$
+
+| 显著性水平 α | 覆盖保证 | 经验覆盖率 | 异常检测率 |
+|---|---|---|---|
+| 0.01 | 99% | 99.4% ✅ | 100% |
+| 0.05 | 95% | 96.7% ✅ | 100% |
+| 0.10 | 90% | 88.3% | 100% |
+
+**对比 OC-SVM**：原始 OC-SVM 覆盖率仅 81.7%（无保证），Conformal 在 α=0.05 时覆盖率 96.7% 且检测率不变。
+
+> **临床意义**：Conformal prediction 允许临床医师选择可接受的误报率（α），系统保证实际误报不超过该水平，支持更安全的辅助决策。
+
+参考：Angelopoulos & Bates, "Conformal Prediction: A Gentle Introduction", *Foundations and Trends in ML*, 2023.
+
+### 3.7 姿态几何行为检测
 
 基于领域知识的规则方法，利用骨架几何和频率分析检测三类刻板行为：
 
@@ -149,6 +172,35 @@ $$y_t \sim \mathcal{N}(\mu_k, \sigma), \quad k = \begin{cases} 1 & t < \tau \\ 2
 
 > VLM 模块为框架性实现，实际调用需配置 API key。定位为姿态方法的**上下文补充**（理解场景语义），而非替代。
 
+### 3.10 ADOS 临床评分关联分析
+
+将计算运动特征与 ADOS-2 临床金标准评分做关联，检验计算方法的**临床效度**（clinical validity）。
+
+**数据：** 19 名儿童同时拥有骨架数据和 ADOS-2 评分（Social Affect、RRB、Overall Total、Comparison Score 1-10）。
+
+**每个儿童的聚合运动特征：**
+- 平均速度/加速度（跨所有活动片段）
+- 运动变异性（跨片段速度标准差）
+- 主频（手腕关节 FFT 中位数）
+- 高频功率比（2-6 Hz 刻板行为频段）
+
+**Spearman 相关结果（显著 p < 0.05）：**
+
+| 运动特征 | ADOS 子项 | Spearman ρ | p 值 | 解释 |
+|---|---|---|---|---|
+| 主频 (Dominant Freq) | Social Affect | **0.521** | **0.022** | 频率越高 → 社会情感缺陷越严重 |
+| 主频 (Dominant Freq) | Overall Total | **0.469** | **0.043** | 频率越高 → ADOS 总分越高 |
+| 主频 (Dominant Freq) | Comparison Score | **0.488** | **0.034** | 频率越高 → 自闭症严重度越高 |
+
+**趋势水平（p < 0.10）：**
+- Speed Std ↔ Comparison Score: ρ=0.609, p=0.062（n=10）
+- Movement Variability ↔ Comparison Score: ρ=0.609, p=0.062（n=10）
+- HF Power ↔ Social Affect: ρ=0.440, p=0.059
+
+**多元回归：** 6 个运动特征 → Comparison Score，R²=0.605（但 LOO-CV R²=-0.216，说明小样本过拟合，需更多数据）。
+
+> **核心发现：** 手腕运动主频与 ADOS 社会情感评分显著正相关（ρ=0.521, p=0.022），这与临床观察一致——更高频率的重复性运动（如手部拍打）往往伴随更严重的 ASD 症状。这初步验证了**骨架运动特征作为 ASD 严重度生物标记物**的潜力。
+
 ---
 
 ## 4. 综合方法对比
@@ -158,8 +210,10 @@ $$y_t \sim \mathcal{N}(\mu_k, \sigma), \quad k = \begin{cases} 1 & t < \tau \\ 2
 | 贝叶斯变点 | 活动分段 | 边界误差 1.24s | ✅ 后验 CI | 无监督 |
 | HMM（3 状态） | 多状态分段 | 边界误差 0.10s | ✅ 状态后验 | 无监督 |
 | One-class SVM | 异常检测 | F1 = 0.891 | ❌ | 半监督 |
+| Conformal OC-SVM | 校准异常检测 | Coverage 96.7% @ α=0.05 | ✅ p-value | 半监督 |
 | 姿态几何规则 | 行为分类 | F1 = 1.000 | ❌ | 无监督（领域知识）|
 | 层级贝叶斯 | 个体差异 | σ_pop = 0.128 | ✅ 收缩 + CI | 无监督 |
+| 临床关联 | ADOS 效度 | ρ=0.521 (p=.022) | ✅ | 相关分析 |
 | VLM 上下文 | 场景理解 | 定性 | ❌ | 零样本 |
 
 ---
@@ -200,7 +254,9 @@ streamlit run app.py
 ├── notebooks/
 │   ├── 01_EDA_synthetic.py         # 合成数据 EDA（7 张图）
 │   ├── 02_pipeline_real_data.py    # 真实数据全流程
-│   └── 03_full_evaluation.py       # 全方法对比评估
+│   ├── 03_full_evaluation.py       # 全方法对比评估
+│   ├── 04_clinical_correlation.py  # ADOS 临床评分关联分析
+│   └── 05_conformal_prediction.py  # Conformal Prediction 校准检测
 ├── src/
 │   ├── data/
 │   │   ├── mmasd_loader.py         # MMASD 数据加载器
@@ -213,15 +269,18 @@ streamlit run app.py
 │   │   ├── bayes_hierarchical.py   # 层级贝叶斯模型
 │   │   ├── hmm.py                  # 隐马尔可夫模型
 │   │   ├── oneclass.py             # One-class SVM
+│   │   ├── conformal.py            # Conformal Prediction 校准检测
 │   │   └── vlm_analyzer.py         # VLM 分析 + 姿态几何检测
+│   ├── analysis/
+│   │   └── clinical_correlation.py # ADOS 临床评分关联分析
 │   └── eval/
 │       └── metrics.py              # 评估指标
 ├── scripts/
 │   ├── 00_inspect_dataset.py       # 数据集初检
 │   └── 01_download_data.sh         # 数据下载说明
 └── results/
-    ├── figures/                    # 11 张分析图
-    └── tables/                     # 4 张 CSV 结果表
+    ├── figures/                    # 18+ 张分析图
+    └── tables/                     # 6 张 CSV 结果表
 ```
 
 ---
@@ -252,19 +311,37 @@ python -I notebooks/02_pipeline_real_data.py
 
 ## 8. 局限与未来工作
 
-- **合成数据验证**：当前结果基于合成数据，需在 MMASD 真实数据上验证泛化性
+- **样本量**：临床关联分析仅 19 名儿童（ADOS + 骨架数据交集），多元回归过拟合，需更大样本验证
 - **单变点 → 多变点**：当前贝叶斯模型假设单个变点，实际行为可能有多次切换
 - **VLM 量化评估**：VLM 模块为框架性实现，需要系统的定量对比
 - **跨数据集域适应**：不同数据集的骨架格式、相机参数、被试群体存在差异
-- **临床验证**：方法需与临床评分（ADOS-2 等）做相关性分析
+- **因果推断**：当前为相关性分析，运动特征与 ADOS 评分的因果关系需纵向数据验证
+- **深度学习基线**：ST-GCN 等骨架图神经网络与经典方法的系统对比（计划中）
 
 ---
 
 ## 9. 参考文献
 
+**数据集与临床:**
 - Li, J. et al. "MMASD: A Multimodal Dataset for Autism Intervention Analysis." *ICMI '23*. DOI: 10.1145/3577190.3614117
-- Rajagopalan, S.S. et al. "Self-Stimulatory Behaviours in the Wild for Autism Diagnosis." *ICCV Workshops, 2013*.
-- Salvatier, J., Wiecki, T.V., & Fonnesbeck, C. "Probabilistic programming in Python using PyMC3." *PeerJ Computer Science, 2016*.
+- Lord, C. et al. "Autism Diagnostic Observation Schedule, Second Edition (ADOS-2)." *Western Psychological Services*, 2012.
+
+**贝叶斯建模:**
+- Abril-Pla, O. et al. "PyMC: A Modern, and Comprehensive Probabilistic Programming Framework in Python." *PeerJ Computer Science*, 2023.
+- Gelman, A. et al. *Bayesian Data Analysis*, 3rd ed. CRC Press, 2013.
+
+**不确定性量化:**
+- Angelopoulos, A.N. & Bates, S. "Conformal Prediction: A Gentle Introduction." *Foundations and Trends in Machine Learning*, 2023.
+- Shafer, G. & Vovk, V. "A Tutorial on Conformal Prediction." *JMLR*, 2008.
+
+**骨架行为分析:**
+- Rajagopalan, S.S. et al. "Self-Stimulatory Behaviours in the Wild for Autism Diagnosis." *ICCV Workshops*, 2013.
+- Yan, S. et al. "Spatial Temporal Graph Convolutional Networks for Skeleton-Based Action Recognition." *AAAI*, 2018.
+- Chen, Y. et al. "Channel-wise Topology Refinement Graph Convolution for Skeleton-Based Action Recognition." *ICCV*, 2021.
+
+**计算健康与 ASD:**
+- Washington, P. et al. "A Review of and Roadmap for Data Science and Machine Learning for the Neuropsychiatric Phenotype of Autism." *Annual Review of Biomedical Data Science*, 2023.
+- Dawson, G. & Sapiro, G. "Potential for Digital Behavioral Measurement Tools to Transform the Detection and Diagnosis of Autism Spectrum Disorder." *JAMA Pediatrics*, 2019.
 
 ---
 
