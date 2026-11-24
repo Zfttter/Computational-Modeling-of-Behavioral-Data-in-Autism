@@ -1,0 +1,7 @@
+Method,Task,Key metric,Uncertainty,Supervision,Complexity
+Bayesian Changepoint,Activity segmentation,Boundary error: 1.240s,Yes (posterior CI),Unsupervised,O(T·draws)
+HMM (3-state),Multi-state segmentation,Boundary error: 0.100s,Yes (state posteriors),Unsupervised,O(T·K²·iter)
+One-class SVM,Anomaly detection,F1: 0.891,No (decision boundary),Semi-supervised (normal only),O(n²·d)
+Pose Geometry Rules,Behavior classification,F1: 1.000,No,Unsupervised (domain knowledge),O(T·J)
+Hierarchical Bayesian,Individual differences,Pop σ: 0.128,Yes (shrinkage + CI),Unsupervised,O(N·draws)
+VLM Contextual,Scene understanding,Qualitative (needs API key),No (prompt-dependent),Zero-shot,O(frames · API_call)
